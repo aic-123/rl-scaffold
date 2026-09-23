@@ -1,0 +1,11 @@
+# rl-scaffold 的第三方依赖。
+#
+# 只有一条：PyYAML——与 vendor 来的上游校验器（validator/validate.py）同一份依赖。
+# 装：python -m pip install -r requirements.txt
+#
+# ⚠️ 为什么这个文件必须存在：README 的「5 分钟上手」第一条命令是
+#    `python validator/validate.py ./nodes`，而没有 PyYAML 时它会直接
+#    `ModuleNotFoundError: No module named 'yaml'`——
+#    也就是说，"5 分钟上手"在干净环境里**第一步就断**。
+#    见 AUDIT.md §三 第 9 条。
+PyYAML>=6.0

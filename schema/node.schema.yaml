@@ -1,0 +1,114 @@
+# Copyright 2026 AIC-123 · SPDX-License-Identifier: Apache-2.0
+# node.schema.yaml · 节点字段定义（机器可读）
+#
+# 这是 SPEC.md 第一节的机器可读镜像。校验器运行时用的是 validator/validate.py
+# 里的常量（保持零依赖、可单文件拷走），两者的一致性由
+#     python validator/validate.py --self-test
+# 强制检查。
+#
+# 被 self-test 守护的键（改这些就必须同时改 validate.py，否则 self-test 失败）：
+#   types 的前缀映射 · 字段清单 · 每个字段的 required · id.pattern ·
+#   evidence_status 的 user_writable / default / hook_only ·
+#   filled_by 的 convention / convention_pattern / value_whitelist / empty_marker ·
+#   cues.severity · source.kind 的 enum
+# 未被守护的：desc / note / fields 内部的说明文字——它们不参与校验，改错不会红。
+
+version: 0
+
+fields:
+  id:
+    type: str
+    required: true
+    unique: true
+    pattern: "^[a-z]{2,6}-\\d{4}$"
+    desc: 类型前缀-四位序号，全局唯一
+  type:
+    type: str
+    required: true
+    enum_ref: types
+    desc: 节点类型
+  title:
+    type: str
+    required: true
+    desc: 概念索引的键。必填。
+  aliases:
+    type: list[str]
+    required: true
+    desc: 词汇层别名（SKOS altLabel）——同义词、俗称、错称。空数组合法且不报警。
+    note: 与 cues 严格区分。cues 答"我现在处在哪种处境"，aliases 答"这东西还叫什么名字"。
+  cues:
+    type: list[str]
+    required: true
+    severity: WARN
+    desc: 情境索引。调用的真正入口。空数组为警告级（R6），不阻断。
+  scope:
+    type: str
+    required: true
+    desc: 适用范围，必须同时写清不适用
+  source:
+    type: map
+    required: true
+    nullable_inner: true      # 字段必填，但内部两项可为空
+    fields:
+      ref:
+        type: str
+        required: false
+        desc: DOI / 标准编号 / 教材章节 / 链接
+      kind:
+        type: str
+        required: false
+        # 单轴：只描述「来源是什么文体/载体」。
+        # 不描述「来源是不是人」——那是归属（filled_by 那一侧），不是来源。
+        # 也不含「未填」状态——未填用空字符串表示，与 ref 一致。
+        # 2026-09-22 拆轴：旧的 `个人` 并入 `访谈口述`；旧的 `未知` 删除
+        # （它与 ref 为空 30/30 完全共现，零信息量）。
+        enum: [教材, 论文, 标准, 官方文档, 访谈口述, 其他]
+        empty_means: 未填
+  evidence_status:
+    type: str
+    required: true
+    default: 未验证
+    user_writable: [已确立, 假说, 有争议, 已淘汰, 未验证]
+    hook_only: [已验证]
+    desc: 仅钩子可授予 已验证；见 rules.md R7
+  relations:
+    type: list[str]
+    required: true
+    desc: 指向其他节点 id，含"例外覆盖"
+  filled_by:
+    type: str
+    required: true
+    # 取值不设白名单。校验器只要求本字段存在，不规定"只能写什么"——
+    # 下游要接自己的填充器（别的模型、脚本、机构流程），自行定义取值并在自己的校验里
+    # 加约束即可，不必改这份结构。
+    convention: [人, 未填充]
+    convention_pattern: "^模型\\(.+\\)$"
+    value_whitelist: false
+    # 唯一被结构校验的一条：「未填充」不是一种署名方式，而是一个事实断言——
+    # 这个节点还没人填过。所以它不该和已填内容同时出现，否则报 R8。
+    # ⚠️ R8 目前是**暂定 WARN**：哪些字段算「已填」（title 算不算）尚未定案，
+    #    留待产品期。详见 validator/rules.md 的 R8 章节末。
+    empty_marker: 未填充
+    desc: 如实标注填充者。示例数据写 模型(示例数据)。
+  notes:
+    type: str
+    required: true
+    desc: 自由文本。无从得知的字段在此写 待填。
+
+# id 前缀映射（R5 用它校验 前缀与 type 是否相符）
+types:
+  概念: {prefix: con}
+  判断点: {prefix: judge}
+  条件: {prefix: cond}
+  例外: {prefix: exc}
+  议题: {prefix: issue}
+  立场: {prefix: stance}
+  论据: {prefix: arg}
+  断言: {prefix: claim}
+  案例: {prefix: case}
+
+# 节点文件形态
+file:
+  glob: "*.md"
+  shape: "---\n<YAML front matter>\n---\n<正文，可选>"
+  encoding: utf-8
