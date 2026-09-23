@@ -445,7 +445,10 @@ def main() -> int:
         print("nodes/ 里没有可解析的节点。", file=sys.stderr)
         return 1
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(render(nodes, match_by_id, raw_by_id), encoding="utf-8")
+    # ⚠️ 同 build_index.py：必须显式写 LF，否则 Windows 上生成物是 CRLF，
+    # 工作区会飘（`.gitattributes` 只保得住仓库侧，保不住工作区）。
+    with open(OUT, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(render(nodes, match_by_id, raw_by_id))
     n_judge = sum(1 for n in nodes if n.get("type") == "判断点")
     print(f"已生成 {OUT.relative_to(ROOT)}：{len(nodes)} 个节点，"
           f"{n_judge} 条可行路径。")

@@ -1,0 +1,62 @@
+name: 检索落错了 / 没匹配上
+description: 你用一句自己的话去查，结果落到了不该落的节点，或者干脆说「没匹配上」。**这是本仓库最有价值的一类反馈。**
+title: "[检索] "
+labels: ["retrieval"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **为什么这一类最重要**：本项目的自我检查里有一句原话——
+        **「用自己造的用例测自己的系统，测的是自洽，不是覆盖。覆盖要靠外部场景来撞。」**
+
+        你这一句话就是那个"外部"。它比任何自测都有用。
+
+  - type: textarea
+    id: utterance
+    attributes:
+      label: 你那句话（**原话，别改顺**）
+      description: |
+        逐字粘贴。**不要润色、不要改成"规范说法"**——
+        改动会掩盖掉真实的口语、长度和断句，而缺陷往往正在那里。
+        一整段几百字也没关系（有 `--split` 开路）。
+      placeholder: 我基于 verl 跑 qwen3.5 的 GRPO，跑了 200 步左右 reward 曲线崩了……
+    validations:
+      required: true
+
+  - type: input
+    id: command
+    attributes:
+      label: 你跑的命令
+      placeholder: python tools/find_path.py --problem "……"
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际输出（**整段粘贴**）
+      description: 包含分数与前几条候选。不要只贴你关心的那一行。
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: expected
+    attributes:
+      label: 你以为该落到哪
+      description: 知道节点 id 就写 id；不知道就描述"我想问的是什么"，不必猜。
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+
+        ⚠️ **一个请求**：如果这句话是你**真实**遇到的，请顺手说明它属于哪种——
+        这决定了它能进 `HELD_OUT` 还是只能进 `CORPUS`：
+
+        - **真实遇到**（你或同事真碰上过）→ 它能进**留出集**，是判断"改写鲁棒性"的尺子
+        - **你构造的**（"我猜用户可能会这么问"）→ 只能进 `CORPUS`，用来找内容缺口
+
+        两者都有用，但**不能混为一谈**：把测试集喂成训练集，是所有这类项目翻车的同一个姿势。

@@ -1,0 +1,13 @@
+# ⚠️ 本仓库的模板偏"要证据"，不偏"走流程"。
+# 原因：这个项目的立身之本是「**空值合法、填充留痕、已验证只能外部授予**」，
+# 而最容易破坏它的动作，就是**把没有出处的句子写进结构**。
+# 所以每个模板都在问同一件事：**你的依据是什么。**
+
+blank_issues_enabled: false
+contact_links:
+  - name: 先读 README 的「这里的内容是什么成色」与「它不是什么」
+    url: https://github.com/aic-123/rl-scaffold#readme
+    about: 大量问题在这两节里已有答案——尤其是「为什么全是模型填的」和「为什么没有案例」
+  - name: 开工前先读 DECISIONS.md
+    url: https://github.com/aic-123/rl-scaffold/blob/master/DECISIONS.md
+    about: 已定案的不重开。想推翻某条，照它 §四 走完四步（指名 / 新证据 / 代价 / 留痕）

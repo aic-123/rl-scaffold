@@ -1,0 +1,64 @@
+name: 内容有问题
+description: 某个节点写错了、过时了、越界了，或者引用范围超过了实际读到的范围。
+title: "[内容] "
+labels: ["content"]
+body:
+  - type: input
+    id: node
+    attributes:
+      label: 哪个节点
+      description: 节点 id（如 `judge-0009`）或文件路径
+      placeholder: judge-0009
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 属于哪一类
+      description: 这决定了修法——**事实错误直接改，规格缺口只登记**。
+      options:
+        - 事实错误（写错了，有依据可证）
+        - 来源不实（citation 说的比实读的多）
+        - 越界（把"该论文的设置"写成了"推荐值"）
+        - 过时（上游或论文已更新）
+        - 说不清（我不确定，但读着不对）
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 错在哪（**请附依据**）
+      description: |
+        贴原文片段 + 你的依据（论文链接与章节 / 官方文档 / 你自己的实测输出）。
+
+        ⚠️ **"我觉得不对"不足以改动这个结构。**
+        本项目的节点全部由模型填、全部标 `未验证`——它已经承认自己可能错。
+        要让它改，就得给出**可以核对的东西**。
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence_note
+    attributes:
+      label: 如果你提的是新来源，请交代引用强度
+      description: |
+        本项目有一条硬纪律：**引用强度不得超过实际读到的范围**。
+        （这条纪律曾经被违反过一次，记录在 `SOURCES.md` §七。）
+        所以请写明：读的是摘要还是正文？读到了哪一节？
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+
+        **请不要提这类请求**（它们与项目定位冲突，会被直接关闭并说明原因）：
+
+        - 请推荐超参值 / 给"最佳实践排行" / 给节点排序加权
+        - 请把"已验证"标上——**按 Scaffold 的规矩，`已验证` 只能由外部授予，模型与维护者都不能自声明**
+        - 请把某个议题"裁定一下，给个结论"——本结构**分歧只列不裁**
+        - 请收录**亲历案例**——那个模型填不了，只能由使用者提供真实实验记录

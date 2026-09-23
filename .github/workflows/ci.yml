@@ -1,0 +1,91 @@
+name: checks
+
+# 为什么这些步骤值得上 CI：
+# 本项目的核心声称是「结构自洽 + 两个视图同序 + 匹配不上就如实说匹配不上」。
+# 这三条全部**已经**是可执行命令 + 有明确期望退出码 —— 那它天生就是 CI 的形状。
+# 没有 CI 的话，这些声称没有任何机器在守，只能靠人记得跑。
+
+on:
+  push:
+  pull_request:
+  # 手动入口。⚠️ 它是否真的出现在 Actions 页面上，只能人工确认——
+  # 触发它的 API 需要鉴权，本地无法自证。能自证的只有：本文件被 push 后 YAML 解析无误。
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.9 是 README 声明的下限；3.12 是当前主力。两头都钉住。
+        python-version: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: 装依赖（唯一一条：PyYAML）
+        run: python -m pip install --quiet -r requirements.txt
+
+      # ── 期望退出码 0 的四条 ──────────────────────────────────────
+      - name: 结构自洽（不判断内容对错）
+        run: python validator/validate.py nodes
+
+      - name: 校验器自检
+        run: python validator/validate.py --self-test
+
+      - name: 视图一致性（两个视图同一份规格）
+        run: python tools/render_view.py --check
+
+      - name: 检索自检（固定用例 + 负例 + 内容断言 + 长口述）
+        run: python tools/find_path.py --check
+
+      # ── 生成物必须与节点同步 ────────────────────────────────────
+      # 这条防的是：有人改了 nodes/ 但忘了重建视图。
+      # 视图是生成物但**入库**（本产品要求视图可 diff），所以"忘了重建"会静默留下过期的视图。
+      - name: 重建两个视图，然后要求工作区无改动
+        run: |
+          python tools/build_index.py
+          python tools/render_view.py
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::生成物与节点不一致——改了节点却没重建视图（下面是要补的 diff）"
+            git status --porcelain
+            git diff
+            exit 1
+          fi
+
+      # ── ⚠️ 断言极性在这里反转 ────────────────────────────────────
+      # 「越界查询」的**正确行为是非零退出码**（如实说"没匹配上"）。
+      # 直接写 `run: python tools/find_path.py --problem "今天天气怎么样"`
+      # 会让这一步**永远红**，而且看起来像代码坏了。
+      - name: 「越界查询必须匹配不上」（**期望非零**）
+        run: |
+          if python tools/find_path.py --problem "今天天气怎么样"; then
+            echo "::error::越界查询竟然匹配上了——「匹配不上就如实说匹配不上」这条声称已失效"
+            exit 1
+          fi
+          echo "OK：越界查询被正确拒绝"
+
+      # 上面那条的反面：正常查询**必须**匹配上。
+      # 少了这条，一个"永远匹配不上"的实现也能让上一条通过。
+      - name: 「正常查询必须匹配上」（**期望 0**）
+        run: |
+          if ! python tools/find_path.py --problem "日志里 entropy 一路往下掉，我不知道要不要停" > /dev/null; then
+            echo "::error::正常查询没匹配上——检索退化了"
+            exit 1
+          fi
+          echo "OK：正常查询命中"
+
+      # ── 只报告、不门禁 ──────────────────────────────────────────
+      # 同义改写命中率是一个**指标**，不是一个"过/不过"。
+      # 把它做成门禁会诱使人去"压这个数"（比如把测试句子抄进索引）——那是把测试集喂成训练集。
+      # 所以：打印出来，让人看见趋势，但不让它红。
+      - name: 报告同义改写命中率（不门禁）
+        run: python tools/probe_gaps.py --held
+        continue-on-error: true

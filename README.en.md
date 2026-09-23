@@ -54,7 +54,11 @@ A **plain-text, line-by-line diffable** knowledge structure covering the places 
 ## 5-minute quickstart
 
 ```bash
-# 0. Install the only dependency (PyYAML)
+# 0. Get the code
+git clone https://github.com/aic-123/rl-scaffold.git
+cd rl-scaffold
+
+# 0b. Install the only dependency (PyYAML)
 python -m pip install -r requirements.txt
 
 # 1. Check structural self-consistency (does not judge content correctness)
@@ -84,7 +88,7 @@ python tools/probe_gaps.py --miss             # only the ones that fell through
 python tools/probe_gaps.py --held             # paraphrase robustness on a held-out set
 ```
 
-Dependencies: Python 3.9+ and `PyYAML` (the same one dependency as the vendored validator), listed in `requirements.txt`.
+Dependencies: Python 3.9+ and `PyYAML` (the same one dependency as the vendored validator), listed in `requirements.txt`. **No `pyproject.toml`, and no package install** — that is deliberate; see "Known non-goals".
 **⚠️ Without it, the very first command fails with `ModuleNotFoundError: No module named 'yaml'`** — that's not a doc oversight, it's the price of the project's "zero lock-in" stance, which is why step 0 is spelled out.
 
 **First-value path**: throw **your own** problem, in your own words, at `tools/find_path.py --problem`. It matches one situation, then walks a six-step path along `relations`.
@@ -313,6 +317,15 @@ ADAPT.md               structure adaptation decisions
 PLAN.md                step plan
 AUDIT.md               architecture audit + remediation record
 DECISIONS.md           settled decisions + working rules (read this first)
+GAPS.md                gap list (a to-do list, not an acceptance list)
+CHANGELOG.md           change log
+CONTRIBUTING.md        how to contribute (read before you start)
+CODE_OF_CONDUCT.md     code of conduct
+NOTICE                 copyright + vendored-code provenance
+README.md              Chinese side (cross-linked with this file)
+index/                 the two views (generated)
+.github/               CI + issue templates + PR template
+.editorconfig          editor line endings/indent (.gitattributes governs git, not editors)
 ```
 
 ---

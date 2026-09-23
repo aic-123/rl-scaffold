@@ -61,7 +61,11 @@
 ## 5 分钟上手
 
 ```bash
-# 0. 装依赖（只有一条：PyYAML）
+# 0. 把代码拿到手
+git clone https://github.com/aic-123/rl-scaffold.git
+cd rl-scaffold
+
+# 0b. 装依赖（只有一条：PyYAML）
 python -m pip install -r requirements.txt
 
 # 1. 校验结构自洽（不判断内容对错）
@@ -90,7 +94,7 @@ python tools/probe_gaps.py                    # 39 句构造语料全量跑
 python tools/probe_gaps.py --miss             # 只看没接住的
 ```
 
-依赖：Python 3.9+ 与 `PyYAML`（与 vendor 来的校验器同一份依赖），列在 `requirements.txt`。
+依赖：Python 3.9+ 与 `PyYAML`（与 vendor 来的校验器同一份依赖），列在 `requirements.txt`。**不需要 `pyproject.toml`，也不需要装成一个包**——这是刻意的，见「已知的未做」。
 **⚠️ 不装依赖时第 1 条命令就会 `ModuleNotFoundError: No module named 'yaml'`**——
 这不是文档疏漏，是这产品"零锁定"的代价，所以第 0 步显式写出来。
 
@@ -323,7 +327,13 @@ AUDIT.md               架构审查 + 修复记录
 DECISIONS.md           已定案 + 工作规则（**开工前先读这个**）
 GAPS.md                缺口清单（是待办，不是验收项）
 README.en.md           英文侧（与本文互链）
+CHANGELOG.md           变更记录
+CONTRIBUTING.md        参与方式（**先读它,再动手**）
+CODE_OF_CONDUCT.md     行为准则
+NOTICE                 版权与 vendored 代码出处
 index/                 两个视图（生成物）
+.github/               CI + issue 模板 + PR 模板
+.editorconfig          编辑器行尾/缩进（`.gitattributes` 管得住 git，管不住编辑器）
 ```
 
 ---

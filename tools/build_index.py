@@ -103,7 +103,13 @@ def main() -> int:
             lines.append(f"- `{n.get('id')}` → {'、'.join(f'`{r}`' for r in rels)}\n")
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text("".join(lines), encoding="utf-8")
+    # ⚠️ `newline="\n"` 不能省：不显式指定时，Python 会按**平台**换行转换，
+    # 于是在 Windows 上写出 CRLF。`.gitattributes` 能挡住它进仓库
+    # （`git ls-files --eol` 仍是 i/lf），但**工作区会飘**——
+    # 于是「重建视图后 git status 应当干净」这条检查在 Windows 上永远红。
+    # 显式写 LF，两个平台上工作区都干净。
+    with open(OUT, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write("".join(lines))
     print(f"已生成 {OUT.relative_to(ROOT)}：{len(pairs)} 条处境 / {len(nodes)} 个节点。")
     return 0
 
