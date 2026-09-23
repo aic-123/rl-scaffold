@@ -113,6 +113,19 @@ MATCH_SPEC = {
     "（已把「我的显卡坏了怎么办」0.14 与「公司不给我批算力」0.11 补进去）。"
     "⚠️ 想再往上抬命中率，就得动匹配算法，而每种改法都会**抬高所有分数**——"
     "那会把负例一起抬过线。**那是 D-04 级别的事，见 DECISIONS.md。**",
+    "长口述会被长度稀释（2026-09-23 新增修正）":
+    "Dice 的分母是两边长度之和，所以**长问句会被长度稀释**。"
+    "实测：一句 150 多字的当事人原话（「我基于 verl 跑 qwen3.5 的 GRPO，跑到 109/200 步 "
+    "reward 崩了，审计到有一半 rollout 推对了却给了 0 分…」），"
+    "与最像的那条 cue **Dice 只有 0.081，而重合系数是 0.400——差 5 倍**，"
+    "于是**话题完全对上的长口述被判成「没匹配上」**。"
+    "修正：`base` 里加上 `0.6 × 重合系数`（与 Dice 取 max，不是相加）。"
+    "实测（α=0.6）：长口述 0.15 → **0.24**（接得住）；越界负例最高 0.150（**边距反而从 0.04 变宽到 0.09**）"
+    "——因为这一项抬高真阳性比抬高负例更多。",
+    "为什么不能单独用重合系数":
+    "重合系数是 `|A∩B| / min(|A|,|B|)`，**不含长度惩罚**："
+    "长句里随便嵌一句短话就会接近满分。所以只能**加权后与 Dice 取 max**，"
+    "不能把 Dice 换掉。",
     "低于阈值怎么办": "如实说「没匹配上」，并列出最接近的三条让你自己挑。"
     "不猜、不兜底、不硬凑一个答案给你。",
     "判断点必须靠处境句进（2026-09-23 新增门槛）":
@@ -138,6 +151,12 @@ TAU = MATCH_SPEC["阈值"]
 
 # 匹配器允许看到的字段白名单。不在这个集合里的，一律不进内存。
 MATCH_FIELDS = ("id", "type", "title", "aliases", "cues", "scope", "relations")
+
+# 重合系数（`_overlap`）的权重。**不能改成 1.0**——那等于放弃长度归一，
+# 长句里随便嵌一句话就会满分。0.6 是实测出来的一组里最稳的：
+#   长口述最高分 0.240（≥0.18，接得住）｜越界负例最高 0.150（<0.18，边距反而变宽）。
+# 见 MATCH_SPEC["长口述会被长度稀释"]。
+_OVERLAP_ALPHA = 0.6
 
 _TYPE_ORDER = ["概念", "判断点", "条件", "例外", "议题", "立场", "论据", "断言", "案例"]
 
@@ -249,6 +268,24 @@ def _dice(a, b) -> float:
     return 2 * len(A & B) / (len(A) + len(B))
 
 
+def _overlap(a, b) -> float:
+    """重合系数：`|A∩B| / min(|A|,|B|)`。
+
+    ⚠️ 2026-09-23 新增。为什么光有 Dice 不够：
+    **Dice 的分母是两边长度之和，长问句会被长度稀释。**
+    实测（一句 150 多字的当事人原话 vs 各条 cue）：
+    **最像的那条 cue，Dice 只有 0.081，而重合系数是 0.400——差 5 倍。**
+    于是**话题完全对上的长口述会被判成「没匹配上」**。
+
+    重合系数不惩罚长度差，代价是它对「长句里嵌了一句短话」很宽松——
+    所以**不能单独用**，只能加权后与 Dice 取 max（见 `_OVERLAP_ALPHA`）。
+    """
+    A, B = _bigrams(a), _bigrams(b)
+    if not A or not B:
+        return 0.0
+    return len(A & B) / min(len(A), len(B))
+
+
 def _ids(s) -> set[str]:
     """抽出标识符**集合**（不是拼接串）。
 
@@ -290,10 +327,14 @@ def score(query: str, node: dict) -> tuple[float, dict]:
     hits = sorted(q_ids & _hay_tokens(node))
 
     best_cue, cue_d = "", 0.0
+    cue_o = 0.0
     for c in cues:
         d = _dice(query, c)
         if d > cue_d:
             best_cue, cue_d = c, d
+        o = _overlap(query, c)
+        if o > cue_o:
+            cue_o = o
 
     title_d = _dice(query, title)
     alias_d = max((_dice(query, a) for a in aliases), default=0.0)
@@ -305,10 +346,11 @@ def score(query: str, node: dict) -> tuple[float, dict]:
     id_weight = sum(_idf(t) for t in hits)
     id_factor = 0.9 * min(id_weight / 3.0, 1.0)
 
-    base = max(cue_d, 0.75 * title_d, 0.70 * alias_d)
+    base = max(cue_d, _OVERLAP_ALPHA * cue_o, 0.75 * title_d, 0.70 * alias_d)
     total = base * (1.0 + id_factor)
     why = {
         "cue": best_cue, "cue_dice": round(cue_d, 3),
+        "cue_overlap": round(cue_o, 3),
         "title_dice": round(title_d, 3), "alias_dice": round(alias_d, 3),
         "ids": hits, "id_factor": round(id_factor, 3),
     }
@@ -589,6 +631,102 @@ def build_path(match_by_id: dict[str, dict], raw_by_id: dict[str, dict],
     }
 
 
+# ── 长口述先拆句，再逐句匹配 ──────────────────────────────────────────
+# 为什么需要这一步（2026-09-23 使用者指出）：
+# `cues` 都是**一句处境**（20 字上下），而当事人原话常常是**一整段口述**
+# （「我的意思是…首先你得有个基线…比如说我现在基于 verl 跑…」）。
+# **逼匹配器去吞整段是错的**——粒度就不一样。
+# 正确的做法是**先把整段拆成同粒度的句子，再逐句匹配**。
+#
+# 拆法只用**标点和空格**，不用模型：
+#   先按句末标点断句，再按句内标点拆，**空格也算**——
+#   实测踩到过：当事人原话常常是用**空格**断句的
+#   （「我的意思是 首先你得有个基线 比如说我现在基于 verl 跑…」），
+#   只按标点切的话**整段才切成 2 段**，等于没拆。
+# ⚠️ 这样会拆出「我的意思是」这类引导语——**不专门过滤它**，
+#    让它自然地被阈值挡掉，少一条需要维护的规则。
+
+_SPLIT_SEP = re.compile(r"[。！？；;!?，,、：:\s]+")
+_SPLIT_MIN_LEN = 4
+
+
+def split_query(query: str) -> list[str]:
+    """把一段口述拆成同粒度的句子。纯标点切分，无模型、可复现。"""
+    parts = [p.strip() for p in _SPLIT_SEP.split(str(query))]
+    return [p for p in parts if len(p) >= _SPLIT_MIN_LEN]
+
+
+def cmd_split(query: str, match_by_id: dict, raw_by_id: dict) -> int:
+    """逐句匹配，再把结果合起来。返回退出码。"""
+    parts = split_query(query)
+    if len(parts) < 2:
+        print("这段不需要拆（切出来的句子少于 2 段），直接按单句走。")
+        print("用：python tools/find_path.py --problem \"…\"")
+        return 0
+
+    rows: list[tuple[str, str, float, dict]] = []
+    for p in parts:
+        chosen, _all = pick(p, match_by_id)
+        if chosen is None:
+            rows.append((p, "", 0.0, {}))
+        else:
+            rows.append((p, chosen[0], chosen[1], chosen[2]))
+
+    hits = [(p, nid, sc, why) for p, nid, sc, why in rows if nid]
+    print(RULE)
+    print(f"■ 先拆句，再逐句匹配 —— 共 {len(parts)} 段，落下去 {len(hits)} 段")
+    print(RULE)
+    for p, nid, sc, why in rows:
+        if nid:
+            tag = "" if match_by_id[nid]["type"] == "判断点" else f"（{match_by_id[nid]['type']}）"
+            print(f"  [{sc:.2f}] {p}")
+            print(f"         → {nid} {match_by_id[nid]['title']}{tag}")
+        else:
+            print(f"  [  — ] {p}")
+            print("         → 没匹配上（这一段本结构接不住）")
+
+    if not hits:
+        print("\n每一段都没接住。按处境自己找：python tools/find_path.py --list")
+        return 2
+
+    # 合并：同一个节点被多段命中时，按最高分排；再按分数选一个作主入口。
+    best: dict[str, tuple[float, list[str]]] = {}
+    for p, nid, sc, _why in hits:
+        cur = best.get(nid)
+        if cur is None:
+            best[nid] = (sc, [p])
+        else:
+            best[nid] = (max(cur[0], sc), cur[1] + [p])
+    ranked = sorted(best.items(), key=lambda kv: (-kv[1][0], kv[0]))
+
+    print()
+    print(RULE)
+    print("■ 合并后：这几段指向的节点（按最高分排，**顺序不代表可信度**）")
+    print(RULE)
+    for nid, (sc, ps) in ranked:
+        ty = match_by_id[nid]["type"]
+        tail = "" if ty == "判断点" else f"　⚠️ 它是「{ty}」，可能只是词面接近"
+        print(f"  [{sc:.2f}] {nid} {match_by_id[nid]['title']}"
+              f"　← {len(ps)} 段命中{tail}")
+    print()
+    print("⚠️ 上面这些**不是「都相关」**——它们是「字面更像」。分低的那些尤其可能只是碰巧。")
+    print()
+    # 展开谁：**优先判断点**（与 D-04「判断点作为主入口」一致），
+    # 因为路径是给"处境"用的；一段口述里落到的概念/案例多半只是词面接近。
+    judges = [(nid, v) for nid, v in ranked if match_by_id[nid]["type"] == "判断点"]
+    nid, (sc, ps) = (judges[0] if judges else ranked[0])
+    if judges and judges[0][0] != ranked[0][0]:
+        print(f"按**判断点里最高的**（{nid}）展开——它是处境入口；"
+              f"{ranked[0][0]} 分更高但不是判断点。")
+    else:
+        print(f"下面按**最高分那个**（{nid}）展开一条路径。")
+    print("其余命中不是噪声——它们往往正是这条路径的第 ⑥ 步「接下来可能撞上」。")
+    print()
+    why = next(w for _p, n, _s, w in hits if n == nid)
+    print(render_text(build_path(match_by_id, raw_by_id, nid), why, alts=None))
+    return 0
+
+
 # ── 文本输出 ──────────────────────────────────────────────────────────
 
 RULE = "─" * 74
@@ -645,10 +783,14 @@ def render_text(path: dict, why: dict | None = None, alts=None) -> str:
         A(f"  这条处境的原话：「{path['cues'][0]}」")
     if why:
         A("")
-        A(f"  为什么是它：处境句重合 {why['cue_dice']}，"
-          f"标题 {why['title_dice']}，别名 {why['alias_dice']}"
+        A(f"  为什么是它：处境句重合 {why['cue_dice']}"
+          + (f"（长度归一后 {why['cue_overlap']}）" if why.get("cue_overlap") else "")
+          + f"，标题 {why['title_dice']}，别名 {why['alias_dice']}"
           + (f"，标识符命中 {'、'.join(why['ids'])}（放大 ×{1 + why['id_factor']:.2f}）"
              if why["ids"] else ""))
+        if why.get("cue_overlap", 0) and why["cue_overlap"] > why["cue_dice"]:
+            A(f"  注：Dice 是 {why['cue_dice']}、长度归一是 {why['cue_overlap']}——"
+              f"你这句话比 cue 长，所以**看长度归一那个**（规则见 MATCH_SPEC）。")
         A(f"  最像的那条 cue：「{why['cue']}」")
     A("")
 
@@ -818,6 +960,22 @@ SELF_TEST = [
 
 FORBIDDEN_IN_MATCH = ("source", "evidence_status", "filled_by", "_path", "_body")
 
+# ── 长口述的固定用例（`--split`）──────────────────────────────────────
+# 为什么单列：`cues` 都是**一句处境**（20 字上下），而当事人原话常常是**一整段口述**。
+# 整段直接匹配会被**长度稀释**（实测 Dice 0.081 vs 重合系数 0.400），
+# 所以正确的做法是**先拆句、再逐句匹配**。
+# 下面钉住的就是这件事：那段真实口述拆完之后，**至少要有 N 段落到同一个入口**。
+SPLIT_TEST = [
+    # (口述原文, 期望入口, 至少几段落到它)
+    ("我的意思是 首先你得有个基线 比如说我现在基于verl去跑qwen3.5的GRPO "
+     "我现在跑了109步或者200步左右 我发现reward曲线崩了 然后通过引入你这个东西 "
+     "比如审计到有50%的推理结果rollout是推对了的 但是reward给了0分，导致模型训崩了 "
+     "然后根据这个发现你去调整了奖励规则 重新来实验发现reward曲线正常上涨 "
+     "也几乎没有了误判的case 训完之后下有评测也没有问题 我说的是这块 "
+     "你没有结合具体的RL场景",
+     "judge-0009", 3),
+]
+
 
 # ── 断言辅助 ──────────────────────────────────────────────────────────
 # 只断"入口对不对"是不够的：入口对了、内容缺了，一样是没接住。
@@ -960,6 +1118,20 @@ def check() -> int:
     if fails:
         problems += ["匹配自检失败：" + f for f in fails]
 
+    # 5) 长口述：拆句之后必须能落到该落的入口。
+    #    为什么要有这条：整段直接匹配会被**长度稀释**（实测 Dice 0.081 vs 重合 0.400），
+    #    所以「先拆句再逐句匹配」是一条**承诺**——承诺就要有守卫。
+    #    ⚠️ 断言的是「**至少几段**落到同一入口」，不是「全都对」：
+    #       一段口述里必然混着引导语和跑题的话，那些**本来就该落不下去**。
+    for text, want, min_seg in SPLIT_TEST:
+        parts = split_query(text)
+        landed = [pick(p, match_by_id)[0] for p in parts]
+        n_hit = sum(1 for h in landed if h and h[0] == want)
+        if n_hit < min_seg:
+            problems.append(
+                f"长口述拆句后只有 {n_hit} 段落到 {want}（要求 ≥{min_seg}）——"
+                f"共 {len(parts)} 段：{landed}")
+
     if problems:
         for p in problems:
             print(f"[FAIL] {p}", file=sys.stderr)
@@ -970,11 +1142,14 @@ def check() -> int:
     n_neg = sum(1 for c in SELF_TEST if c[1] is None)
     n_scope = sum(1 for n in match_by_id.values()
                   if str(n.get("scope") or "").strip())
+    n_split = sum(1 for t, w, k in SPLIT_TEST if sum(
+        1 for p_ in split_query(t) if (lambda h: h and h[0] == w)(pick(p_, match_by_id)[0])) >= k)
     print(f"检索自检通过：{len(match_by_id)} 个节点 / {n_cue} 条处境；"
           f"{len(SELF_TEST)} 条固定用例全部命中（含 {n_neg} 条负例、{n_assert} 组内容断言）；"
           f"所有路径引用可解析；匹配器拿不到来源与证据状态；"
           f"{n_judge} 个判断点的「怎么确认」都读得出步骤；"
-          f"{n_scope} 个节点的适用范围都印得出（含「不适用于…」那半句）。")
+          f"{n_scope} 个节点的适用范围都印得出（含「不适用于…」那半句）；"
+          f"{n_split}/{len(SPLIT_TEST)} 条长口述拆句后稳定落到同一入口。")
     return 0
 
 
@@ -1004,6 +1179,10 @@ def main() -> int:
 
     entry = _arg("--entry")
     problem = _arg("--problem")
+    split = _arg("--split")
+
+    if split:
+        return cmd_split(split, match_by_id, raw_by_id)
 
     if entry:
         if entry not in match_by_id:
@@ -1118,10 +1297,18 @@ def accepts(nid: str, why: dict, match_by_id: dict) -> bool:
     实测（阈值 0.18）：留出集命中**不损失**（仍 15/17），
     而「靠一个词硬落下来」的可疑命中从 4 条降到 1 条
     （其中「我要不要上 RL」曾落到 `judge-0013` 长度惩罚，靠的只是个 `rl`）。
+
+    ⚠️ 2026-09-23 第二处修正：**门槛必须用"文本分"那一份证据，不能只看 `cue_dice`。**
+    因为长口述会被长度稀释（见 `_overlap`），只认 `cue_dice` 会让
+    「长口述」这种情况**分数 0.46、却被门槛挡住**——分数和门槛打架。
+    现在改成：`cue_dice` / `0.6×重合系数` / `title_dice` 三者取 max，再比阈值。
     """
     if match_by_id[nid]["type"] != "判断点":
         return True
-    return max(why.get("cue_dice", 0.0), why.get("title_dice", 0.0)) >= TAU
+    text_part = max(why.get("cue_dice", 0.0),
+                    _OVERLAP_ALPHA * why.get("cue_overlap", 0.0),
+                    why.get("title_dice", 0.0))
+    return text_part >= TAU
 
 
 def pick(query: str, match_by_id: dict):
